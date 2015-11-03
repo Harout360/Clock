@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.SimpleTimeZone;
+import java.util.logging.*;
 
 import javax.servlet.RequestDispatcher;
 import javax.servlet.ServletException;
@@ -17,12 +18,17 @@ import com.google.appengine.api.datastore.Entity;
 import com.google.appengine.api.datastore.EntityNotFoundException;
 import com.google.appengine.api.datastore.Key;
 import com.google.appengine.api.datastore.KeyFactory;
+import com.google.appengine.api.memcache.MemcacheService;
+import com.google.appengine.api.memcache.MemcacheServiceFactory;
 import com.google.appengine.api.users.User;
 import com.google.appengine.api.users.UserService;
 import com.google.appengine.api.users.UserServiceFactory;
 
 @SuppressWarnings("serial")
 public class ClockServlet extends HttpServlet {
+	//logger for the memcache check (optional)
+	private static final Logger log = Logger.getLogger(ClockServlet.class.getName());
+	
 	public void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException, ServletException {
 		SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd hh:mm:ss.SSSSSS");
 		fmt.setTimeZone(new SimpleTimeZone(0, ""));
@@ -37,13 +43,29 @@ public class ClockServlet extends HttpServlet {
 		req.setAttribute("logoutUrl", logoutUrl);
 		
 		Entity userPrefs = null;
+		//Get user from Memcache, if not there get from Datastore and store in memcache for faster retrieval
 		if(user != null){
 			DatastoreService ds = DatastoreServiceFactory.getDatastoreService();
-			Key userKey = KeyFactory.createKey("UserPrefs", user.getUserId());
-			try{
-				userPrefs = ds.get(userKey);
-			} catch (EntityNotFoundException e){
-				//no user prefs stored
+			MemcacheService memcache = MemcacheServiceFactory.getMemcacheService();
+			
+			String cacheKey = "UserPrefs:" + user.getUserId();
+			userPrefs = (Entity)memcache.get(cacheKey);
+
+			//LOGGING MEMCACHE (OPTIONAL)
+			if(userPrefs == null){
+				log.warning("CACHE MISS");
+			} else {
+				log.warning("CACHE HIT! :D");
+			}
+			
+			if(userPrefs == null){	
+				Key userKey = KeyFactory.createKey("UserPrefs", user.getUserId());
+				try{
+					userPrefs = ds.get(userKey);
+					memcache.put(cacheKey, userPrefs);
+				} catch (EntityNotFoundException e){
+					//no user prefs stored
+				}
 			}
 		}
 		if (userPrefs != null) {
